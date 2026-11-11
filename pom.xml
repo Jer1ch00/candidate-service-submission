@@ -134,9 +134,13 @@
                 <executions>
                     <execution>
                         <goals>
-                            <!-- exposes version/build time on /actuator/info -->
+                            <!-- exposes name/version on /actuator/info -->
                             <goal>build-info</goal>
                         </goals>
+                        <configuration>
+                            <!-- reproducible builds pin the timestamp to 1980; omit it rather than report a false time -->
+                            <time>off</time>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>

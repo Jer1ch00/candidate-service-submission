@@ -33,6 +33,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.transaction.CannotCreateTransactionException;
 import org.springframework.validation.FieldError;
 import org.springframework.validation.ObjectError;
+import org.springframework.web.ErrorResponse;
 import org.springframework.web.HttpMediaTypeNotAcceptableException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
@@ -238,10 +239,17 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             case HttpMediaTypeNotAcceptableException e -> ErrorCode.NOT_ACCEPTABLE;
             default -> fromStatus(statusCode);
         };
-        String detail = body instanceof ProblemDetail problemDetail && problemDetail.getDetail() != null
-                ? problemDetail.getDetail()
+        return problem(code, springDetail(ex, body, code), List.of(), Map.of(), headers, request, ex);
+    }
+
+    /** Spring passes its ProblemDetail as {@code body}, or exposes it on the exception ({@link ErrorResponse}). */
+    private static String springDetail(Exception ex, Object body, ErrorCode code) {
+        ProblemDetail springProblem = body instanceof ProblemDetail problemDetail
+                ? problemDetail
+                : ex instanceof ErrorResponse errorResponse ? errorResponse.getBody() : null;
+        return springProblem != null && springProblem.getDetail() != null
+                ? springProblem.getDetail()
                 : code.title() + ".";
-        return problem(code, detail, List.of(), Map.of(), headers, request, ex);
     }
 
     // ---------------------------------------------------------------------------------------------------------------

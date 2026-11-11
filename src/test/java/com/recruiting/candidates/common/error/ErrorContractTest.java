@@ -234,6 +234,20 @@ class ErrorContractTest {
     }
 
     @Test
+    void protocolErrorsKeepSpringsSpecificDetail() throws Exception {
+        mvc.perform(json(patch("/api/v1/candidates"), VALID_BODY))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(header().exists("Allow"))
+                .andExpect(jsonPath("$.detail").value("Method 'PATCH' is not supported."));
+
+        mvc.perform(key(post("/api/v1/candidates"))
+                        .contentType(MediaType.TEXT_PLAIN)
+                        .content("hello"))
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(jsonPath("$.detail").value("Content-Type 'text/plain' is not supported."));
+    }
+
+    @Test
     void validationErrorsListFieldsWithoutValues() throws Exception {
         mvc.perform(json(post("/api/v1/candidates"), "{}"))
                 .andExpect(jsonPath("$.errors.length()").value(4))

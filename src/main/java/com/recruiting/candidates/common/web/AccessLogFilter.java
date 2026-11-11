@@ -20,6 +20,9 @@ public class AccessLogFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger("http.access");
 
+    /** Pattern of the static-resource fallback handler, which "matches" every unknown path. */
+    private static final String CATCH_ALL_PATTERN = "/**";
+
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
@@ -32,8 +35,10 @@ public class AccessLogFilter extends OncePerRequestFilter {
         }
     }
 
+    /** The matched route template, or the raw path when no endpoint matched (404s, rejected requests). */
     private static String route(HttpServletRequest request) {
         Object pattern = request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE);
-        return pattern != null ? pattern.toString() : request.getRequestURI();
+        boolean matchedEndpoint = pattern != null && !CATCH_ALL_PATTERN.equals(pattern);
+        return matchedEndpoint ? pattern.toString() : request.getRequestURI();
     }
 }
