@@ -1,0 +1,105 @@
+### Candidate Service: sample requests
+### Works with the IntelliJ HTTP Client and the VS Code "REST Client" extension.
+### Start the stack first: docker compose up --build   (dev profile loads 30 sample candidates)
+
+@baseUrl = http://localhost:8080/api/v1
+@apiKey = local-dev-api-key-change-me
+# A seeded candidate (Priya Sharma, status INTERVIEWING, version 2)
+@seededId = 01940000-0000-7000-8000-000000000001
+
+### Create a candidate -> 201 + Location
+POST {{baseUrl}}/candidates
+X-API-Key: {{apiKey}}
+Content-Type: application/json
+
+{
+  "firstName": "Asha",
+  "lastName": "Kumar",
+  "email": "asha.kumar@example.com",
+  "phone": "+91 98450 12345",
+  "currentTitle": "Backend Engineer",
+  "currentCompany": "Acme Corp",
+  "city": "Bengaluru",
+  "country": "IN",
+  "yearsOfExperience": 5,
+  "noticePeriodDays": 30,
+  "skills": ["Java", "Spring Boot", "PostgreSQL"]
+}
+
+### View a candidate
+GET {{baseUrl}}/candidates/{{seededId}}
+X-API-Key: {{apiKey}}
+
+### Search: free text (every term must match), newest first
+GET {{baseUrl}}/candidates?q=backend engineer
+X-API-Key: {{apiKey}}
+
+### Filter on several criteria: Java AND Spring Boot, 4-10 years, India, open pipeline stages, sorted by experience
+GET {{baseUrl}}/candidates?skills=java&skills=spring boot&minExperience=4&maxExperience=10&country=IN&status=NEW&status=SCREENING&status=INTERVIEWING&sort=yearsOfExperience,desc&page=0&size=10
+X-API-Key: {{apiKey}}
+
+### Any of several skills, short notice period, created this year
+GET {{baseUrl}}/candidates?skills=kotlin&skills=swift&skillsMatch=ANY&maxNoticePeriodDays=30&createdFrom=2026-01-01T00:00:00Z
+X-API-Key: {{apiKey}}
+
+### Update the profile (send the version from your last read; status is not part of the profile)
+PUT {{baseUrl}}/candidates/{{seededId}}
+X-API-Key: {{apiKey}}
+Content-Type: application/json
+
+{
+  "firstName": "Priya",
+  "lastName": "Sharma",
+  "email": "priya.sharma@example.com",
+  "phone": "+91 98765 43210",
+  "currentTitle": "Staff Backend Engineer",
+  "currentCompany": "Acme Corp",
+  "city": "Pune",
+  "country": "IN",
+  "yearsOfExperience": 7,
+  "noticePeriodDays": 60,
+  "skills": ["java", "spring boot", "postgresql", "kafka", "kubernetes"],
+  "version": 2
+}
+
+### Move through the pipeline (INTERVIEWING -> OFFERED); use the version returned by the previous call
+PATCH {{baseUrl}}/candidates/{{seededId}}/status
+X-API-Key: {{apiKey}}
+Content-Type: application/json
+
+{ "status": "OFFERED", "version": 3, "note": "Strong system design round" }
+
+### Status history, newest first
+GET {{baseUrl}}/candidates/{{seededId}}/status-history
+X-API-Key: {{apiKey}}
+
+### Delete -> 204
+DELETE {{baseUrl}}/candidates/01940000-0000-7000-8000-000000000030
+X-API-Key: {{apiKey}}
+
+### ---------------- Error contract examples ----------------
+
+### 401 UNAUTHORIZED: no API key
+GET {{baseUrl}}/candidates
+
+### 400 VALIDATION_FAILED: every invalid field is listed
+POST {{baseUrl}}/candidates
+X-API-Key: {{apiKey}}
+Content-Type: application/json
+
+{ "firstName": "", "email": "not-an-email", "country": "XX", "yearsOfExperience": 99 }
+
+### 400 VALIDATION_FAILED: page size is rejected, not silently clamped
+GET {{baseUrl}}/candidates?size=500
+X-API-Key: {{apiKey}}
+
+### 409 INVALID_STATUS_TRANSITION: response lists the allowed moves
+PATCH {{baseUrl}}/candidates/01940000-0000-7000-8000-000000000003/status
+X-API-Key: {{apiKey}}
+Content-Type: application/json
+
+{ "status": "HIRED", "version": 0 }
+
+### 404 CANDIDATE_NOT_FOUND
+GET {{baseUrl}}/candidates/01940000-0000-7000-8000-999999999999
+X-API-Key: {{apiKey}}

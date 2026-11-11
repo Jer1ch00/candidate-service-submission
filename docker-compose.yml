@@ -1,0 +1,44 @@
+# One command to run the service with its database: docker compose up --build
+# Configuration comes from .env (see .env.example); every value has a working local default.
+name: candidate-service
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${DB_NAME:-candidates}
+      POSTGRES_USER: ${DB_USERNAME:-candidates}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-candidates}
+    ports:
+      # Bound to localhost only; change DB_PORT if 5432 is already taken on your machine.
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
+    volumes:
+      # Named volume: data survives container restarts and re-creation.
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build: .
+    depends_on:
+      postgres:
+        # Start only once the database accepts connections (no startup race).
+        condition: service_healthy
+    environment:
+      # 'dev' adds sample data and Swagger UI. Use SPRING_PROFILES_ACTIVE=prod for JSON logs and no Swagger.
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      DB_URL: jdbc:postgresql://postgres:5432/${DB_NAME:-candidates}
+      DB_USERNAME: ${DB_USERNAME:-candidates}
+      DB_PASSWORD: ${DB_PASSWORD:-candidates}
+      API_KEYS: ${API_KEYS:-local-dev-api-key-change-me}
+    ports:
+      - "8080:8080"
+      # Management port (health, metrics) only reachable from this machine.
+      - "127.0.0.1:8081:8081"
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
