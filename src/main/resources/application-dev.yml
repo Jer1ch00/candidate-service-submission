@@ -1,0 +1,15 @@
+# Local development conveniences. Never enable in production.
+app:
+  security:
+    api-keys: ${API_KEYS:local-dev-api-key-change-me}
+
+spring:
+  flyway:
+    # Adds ~30 sample candidates so the API can be explored immediately.
+    locations: classpath:db/migration,classpath:db/seed
+
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true

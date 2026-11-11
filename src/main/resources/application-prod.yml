@@ -1,0 +1,5 @@
+# Production: machine-readable JSON logs (Elastic Common Schema), MDC fields such as requestId included.
+logging:
+  structured:
+    format:
+      console: ecs

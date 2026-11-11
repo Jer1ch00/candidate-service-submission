@@ -1,0 +1,4 @@
+# Test profile: two keys so key rotation is exercised.
+app:
+  security:
+    api-keys: test-api-key-0123456789,rotated-test-key-0123456789
