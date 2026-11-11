@@ -35,9 +35,10 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-candidates}
       API_KEYS: ${API_KEYS:-local-dev-api-key-change-me}
     ports:
-      - "8080:8080"
+      # Host ports are configurable in case 8080/8081 are already taken (e.g. by a local Tomcat).
+      - "${APP_PORT:-8080}:8080"
       # Management port (health, metrics) only reachable from this machine.
-      - "127.0.0.1:8081:8081"
+      - "127.0.0.1:${MANAGEMENT_PORT:-8081}:8081"
     restart: unless-stopped
 
 volumes:
