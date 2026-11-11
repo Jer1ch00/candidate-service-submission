@@ -3,6 +3,7 @@ package com.recruiting.candidates;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.micrometer.metrics.test.autoconfigure.AutoConfigureMetrics;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalManagementPort;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -16,6 +17,7 @@ import org.springframework.web.client.RestClient;
  * not require the API key (orchestrators call them).
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = "management.server.port=0")
+@AutoConfigureMetrics // metrics export is off in tests unless requested
 @Import(TestcontainersConfiguration.class)
 @ActiveProfiles("test")
 class OperationalEndpointsTest {
