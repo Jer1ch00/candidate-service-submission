@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- Build: package with the Maven wrapper (tests run in CI, where Docker is available for Testcontainers) ----
-FROM eclipse-temurin:21-jdk-alpine AS build
+FROM eclipse-temurin:25-jdk-alpine AS build
 WORKDIR /workspace
 COPY .mvn/ .mvn/
 COPY mvnw pom.xml ./
@@ -11,7 +11,7 @@ RUN ./mvnw -B -q package -DskipTests \
     && java -Djarmode=tools -jar target/candidate-service-*.jar extract --layers --launcher --destination target/extracted
 
 # ---- Runtime: JRE only, non-root, layered for cache-friendly rebuilds (dependencies change less than code) ----
-FROM eclipse-temurin:21-jre-alpine
+FROM eclipse-temurin:25-jre-alpine
 RUN addgroup -S app && adduser -S app -G app
 WORKDIR /app
 COPY --from=build /workspace/target/extracted/dependencies/ ./
