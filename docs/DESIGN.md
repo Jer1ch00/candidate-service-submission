@@ -13,15 +13,15 @@ engineering concern, and keep the code explainable. Large-scale concerns are des
 **Deliberate non-goals:** UI, user accounts and login, resume upload/parsing, multi-tenancy, soft delete and audit
 trail, caching, external search engine. Each has a trigger and an approach in [Future scope](#12-future-scope).
 
-## 2. Architecture
+## 2. Architecture and object-oriented design
 
 ```mermaid
 flowchart LR
     client([API client]) -->|HTTPS + X-API-Key| filters
     subgraph app [candidate-service]
         filters["Servlet filters<br/>request id → access log → security headers<br/>→ body size limit → API key"] --> controller[CandidateController<br/>HTTP mapping + validation]
-        controller --> service[CandidateService<br/>transactions, rules, mapping]
-        service --> domain[Domain model<br/>Candidate, status workflow]
+        controller --> service[CandidateService interface<br/>→ CandidateServiceImpl<br/>transactions, rules]
+        service --> domain[Entities + model<br/>Candidate, status workflow]
         service --> repo[Repositories +<br/>search Specifications]
         handler[GlobalExceptionHandler<br/>RFC 9457 errors]
         filters -. rejections .-> handler
@@ -31,14 +31,105 @@ flowchart LR
     ops([Orchestrator / Prometheus]) -->|:8081| actuator[Actuator<br/>health, metrics]
 ```
 
-**Package-by-feature, layered inside the feature** (`candidate/api`, `dto`, `service`, `domain`, `persistence`) plus
-`common/` for cross-cutting infrastructure. ArchUnit enforces the rules in the build: only the API layer calls services,
-only services call repositories, the domain has no web dependencies, `common` knows nothing about features,
-transactions exist only in services, there are no package cycles and no field injection.
+**Layered packages:** `controller`, `service` (interfaces) with `service/impl` (implementations), `repository`,
+`entity`, `model`, `dto`, `mapper`, plus cross-cutting `exception`, `filter`, `config`, `validation` and `util`. The
+controller depends only on the `CandidateService` interface; `CandidateServiceImpl` holds the transactional logic.
+ArchUnit enforces the rules in the build:
+- calls go controller → service → repository, and only the service uses mappers and repositories
+- the controller never sees `service/impl` or entities
+- `service` holds only interfaces; every implementation is an `@Service` named `*Impl` that implements one
+- entities and model have no web or DTO dependencies; cross-cutting packages never reach into business layers
+- transactions exist only in service implementations; no package cycles; no field injection
 
 **Request lifecycle:** filters reject cheaply first (size before authentication), the controller binds and validates,
 the service applies business rules inside a transaction and maps the result to a DTO before the transaction ends (so
 nothing lazy leaks), and any exception, from any layer including filters, is rendered by one handler.
+
+### Object-oriented fundamentals
+
+| Concept | Where it shows |
+|---|---|
+| Encapsulation | `Candidate` has private fields and no setters. Its state changes only through `register`, `updateProfile` and `changeStatus`, which keep its invariants: status is never part of a profile edit and `updatedAt` always moves. `getSkills()` returns a read-only view |
+| Abstraction | Callers see what, not how: the controller sees the `CandidateService` contract, not JPA; failing code names an `ErrorCode` instead of choosing an HTTP status; `Specification` hides how the SQL is built |
+| Inheritance | Kept one level deep: seven typed exceptions extend `ApplicationException`. Otherwise only framework extension points are inherited (`OncePerRequestFilter`, `ResponseEntityExceptionHandler`, `JpaRepository`) |
+| Polymorphism | One handler method renders every `ApplicationException` subclass through `errorCode()`, `details()` and `violations()`; `CandidateMapper.toProfile(ProfileFields)` accepts both create and update requests; `toResponse` is overloaded for candidates and history entries |
+
+### Design principles
+
+| Principle | Where it shows |
+|---|---|
+| Separation of concerns | Each layer does one kind of work (HTTP, business rules, persistence). Cross-cutting concerns (correlation ids, access logging, security headers, size limits, authentication) live in filters; error rendering lives in one handler |
+| Program to an interface | `CandidateService`, the Spring Data repository interfaces, `Specification`, and an injected `java.time.Clock` instead of calling `Instant.now()` |
+| Composition over inheritance | The service is assembled from repositories and a `Clock`; a search is assembled from small `Specification` predicates; the filter chain is assembled in `WebFilterConfig`. Inheritance is reserved for the exception taxonomy and framework hooks |
+| Tell, don't ask (information expert) | The service tells `candidate.changeStatus(target, now)` instead of checking the status itself; `CandidateStatus` owns the transition table, so each rule lives with the data it governs |
+| Law of Demeter | Each class talks only to its direct collaborators: controller → service → repositories and entity methods. Nothing outside `Candidate` changes its fields or its skill set |
+| High cohesion, low coupling | Each package holds one kind of responsibility; dependencies point one way (controller → service → repository) and ArchUnit checks them |
+| Acyclic dependencies | No package cycles (ArchUnit). The request-id constants live in `util/RequestContext`, so the filter and exception packages do not depend on each other |
+| Immutability | DTOs and value objects are records; status-history rows are `@Immutable`; the controller and service hold only `final` fields, so these singleton beans are stateless and thread-safe |
+| Fail fast | Bad configuration stops startup (validated API keys, Hibernate schema validation); bad input is rejected at the boundary before business code runs; `CandidateProfile` refuses missing required fields |
+| Design by contract | The service interface documents each method's errors (`@throws`). Preconditions are enforced by validation, invariants by the entity (status workflow) and by the database (unique email, `CHECK` constraints, cascading foreign keys) |
+| DRY / single source of truth | `ErrorCode` holds the status, title and type of every error; the transition table exists once; `Normalizer` holds every normalization rule; `ProfileFields` shares one set of validation patterns between create and update |
+| KISS and YAGNI | Hand-written static mapper, one service interface, no cache, event bus or search engine. Each deferred item has a trigger in [Future scope](#12-future-scope) |
+
+### SOLID principles
+
+| Principle | Where it shows |
+|---|---|
+| Single responsibility | The controller only maps HTTP; the service owns rules and transactions; the mapper only maps; each filter does one job; `GlobalExceptionHandler` is the only place that builds error responses |
+| Open/closed | A new search filter is one more `Specification` composed in `CandidateSpecifications.matching`; a new error is a new `ApplicationException` subclass plus an `ErrorCode`, with no change to the handler |
+| Liskov substitution | The handler treats every `ApplicationException` subclass through the base type; `CreateCandidateRequest` and `UpdateCandidateRequest` are interchangeable as `ProfileFields` for the mapper |
+| Interface segregation | `ProfileFields` exposes only the fields create and update share. `CandidateService` is one interface because it has one client (the controller); it would split into query and command interfaces if a client needed only part of it |
+| Dependency inversion | The controller depends on the `CandidateService` interface; the service depends on Spring Data repository interfaces and an injected `Clock`; everything is constructor-injected |
+
+### Design patterns
+
+**Gang of Four patterns**
+
+| Pattern | Kind | Where |
+|---|---|---|
+| Strategy | Behavioural | `Clock` is an interchangeable time source: `Clock.systemUTC()` in production (`TimeConfig`), `Clock.fixed(...)` in tests, and the service cannot tell which. Each `Specification` is an interchangeable query rule passed to `repository.findAll(spec, pageable)` |
+| Singleton | Creational, managed by Spring | The controller, service, exception handler and `Clock` are singleton-scoped beans; each filter is created once at startup and shared by all requests. Safe because none holds mutable state. No hand-written `getInstance()`; enum constants (`CandidateStatus`, `ErrorCode`) are singletons by language design |
+| Template method | Behavioural | Filters fill in `doFilterInternal` of `OncePerRequestFilter`; `GlobalExceptionHandler` overrides hooks of `ResponseEntityExceptionHandler` |
+| Chain of responsibility | Behavioural | The servlet filter chain: request id → access log → security headers → size limit → API key; any link can stop the request |
+| Composite | Structural | `Specification.allOf(...)` combines many predicates into one that is used like a single predicate; "has all skills" is itself a composite of "has skill X" |
+| Facade | Structural | `CandidateService` gives the controller one call per use case, hiding repositories, entity rules, status history and mapping |
+| Proxy | Structural, provided by Spring | `@Transactional` on `CandidateServiceImpl` works through a proxy that opens and commits the transaction around each call; Spring Data generates the repository implementations as proxies |
+
+**Other patterns**
+
+| Pattern | Source | Where |
+|---|---|---|
+| Layered architecture | Architectural | The packages above, enforced by ArchUnit |
+| Repository | Fowler / DDD | `CandidateRepository`, `CandidateStatusChangeRepository` (Spring Data) |
+| Specification | Evans and Fowler | `CandidateSpecifications`: one small predicate per criterion, combined with AND |
+| Null object | Woolf | With no criteria, `Specification.unrestricted()` stands in for "no filter", so the search needs no special case |
+| Data transfer object and mapper | Fowler | Request/response records; `CandidateMapper` keeps entities out of the API |
+| Value object | DDD | `CandidateProfile`, `CandidateSearchCriteria`: immutable records, normalized on construction |
+| Table-driven state machine | General | `CandidateStatus` holds the allowed transitions; `Candidate.changeStatus` enforces them |
+| Static factory method | Effective Java (not the subclass-based GoF Factory Method) | `Candidate.register`, `CandidateStatusChange.of`, `PageResponse.of` |
+| Optimistic offline lock | Fowler | `version` on every write, checked explicitly and backed by `@Version` |
+
+**Not used, and why**
+
+| Pattern | Why not (yet) |
+|---|---|
+| Observer | The only reaction to a status change is the history row, which must be written in the same transaction; an event would add indirection for one listener. It becomes right when other parts must react (notifications, analytics): publish `CandidateCreated` / `StatusChanged` domain events through a transactional outbox ([Future scope](#12-future-scope)) |
+| Strategy for skill matching | `SkillMatch` ALL/ANY is chosen with a conditional. With more match modes, each `SkillMatch` constant would build its own specification |
+| GoF State | Statuses differ only in which moves they allow, not in behaviour, so a transition table is simpler than one class per state |
+| Decorator | No behaviour is layered onto objects at runtime; cross-cutting concerns are handled by filters and Spring proxies |
+| Builder | Only in tests (a criteria builder for readable fixtures). In production each object is created in one place from complete data |
+
+### Where a principle is deliberately bent
+
+- **JPA needs a no-argument constructor and mutable fields.** `Candidate` keeps the constructor `protected` and has no
+  setters, so the compromise stays invisible to the rest of the code.
+- **Commands return data.** `create`, `update` and `changeStatus` return the updated candidate, which bends
+  command-query separation. It saves clients a second request and gives them the new `version` they need for their
+  next write.
+- **Static mapper.** It cannot be swapped through dependency injection. That is acceptable while it is a pure function
+  with no collaborators (see [Key decisions](#3-key-decisions)).
+- **One service interface for all use cases.** Interface segregation would split it as soon as a second client needs
+  only part of it.
 
 ## 3. Key decisions
 
@@ -58,7 +149,8 @@ nothing lazy leaks), and any exception, from any layer including filters, is ren
 | **`id` appended to every sort** | Equal sort values (same experience) would otherwise reorder between page requests, duplicating or skipping rows | Sort by the requested field only |
 | **Static API key (several allowed), compared as SHA-256 digests in constant time** | Personal data must not be open; there is no user model, so a key is the simplest correct control; several keys allow rotation without downtime | HTTP Basic with users and roles (implies a login model), issuing our own JWTs (re-building an identity provider) |
 | **Typed exceptions + one `@RestControllerAdvice`** | Code throws, one place translates; consistent contract; impossible to forget a case per controller | `try/catch` per endpoint, error flags or `null` returns |
-| **Records + hand-written mapper; no Lombok or MapStruct** | Explicit, debuggable; three DTOs do not justify code generation | MapStruct, Lombok |
+| **Package-by-layer with service interfaces (`service` + `service/impl`)** | The conventional Spring layout, so developers find things where they expect them; the controller depends on an abstraction, and the contract with its error cases is documented in one place | Package-by-feature (`candidate/api`, `candidate/service`, ...), the original layout: it pays off with several features, but with one feature it only adds nesting. A concrete service class: fewer files, but the controller is coupled to the implementation |
+| **Records + hand-written static mapper; no Lombok or MapStruct** | Explicit, debuggable; three DTOs do not justify code generation; pure functions with nothing to inject (it becomes a bean if it ever needs a collaborator) | MapStruct, Lombok; an injected mapper bean with a single implementation |
 | **Timestamps assigned from an injected `Clock`, truncated to microseconds** | Testable; `updatedAt` also changes on skills-only edits; responses equal later reads (PostgreSQL stores microseconds) | `@CreationTimestamp`/`@UpdateTimestamp` |
 
 ## 4. Data model

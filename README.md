@@ -5,7 +5,7 @@ through a hiring pipeline. PostgreSQL persistence, typed error contract, API-key
 
 | Document | What it covers |
 |---|---|
-| [docs/DESIGN.md](docs/DESIGN.md) | Architecture, design decisions and trade-offs, data model, error handling, security, performance evidence, scaling plan, future scope |
+| [docs/DESIGN.md](docs/DESIGN.md) | Architecture, object-oriented design principles (OOP, SOLID, patterns), design decisions and trade-offs, data model, error handling, security, performance evidence, scaling plan, future scope |
 | [docs/AI_USAGE.md](docs/AI_USAGE.md) | How AI was used, how its output was validated, and where it was overruled |
 | [http/candidates.http](http/candidates.http) | Ready-to-run sample requests (IntelliJ HTTP Client / VS Code REST Client) |
 
@@ -90,7 +90,7 @@ Codes: `VALIDATION_FAILED`, `MALFORMED_REQUEST`, `INVALID_PARAMETER`, `UNAUTHORI
 
 ## Running the tests
 
-Requires Java 21 and Docker (integration tests start PostgreSQL with Testcontainers). 155 tests, about one minute;
+Requires Java 21 and Docker (integration tests start PostgreSQL with Testcontainers). 158 tests, about one minute;
 94.5% line coverage.
 
 ```bash
@@ -136,13 +136,20 @@ Copy `.env.example` to `.env` to change them for docker compose.
 
 ```
 src/main/java/com/recruiting/candidates
-├── candidate/            the candidate feature, layered inside
-│   ├── api/              REST controller (HTTP mapping only)
-│   ├── dto/              request/response records + validation rules
-│   ├── service/          use cases, transactions, business rules, mapping
-│   ├── domain/           entities, status workflow, domain exceptions
-│   └── persistence/      repositories and search specifications
-└── common/               cross-cutting: error contract, filters, configuration, validation
+├── controller/              REST controller: HTTP mapping and validation only
+├── service/                 service interfaces (the contracts the controller depends on)
+│   └── impl/                implementations: transactions and business rules
+├── repository/              Spring Data repositories
+│   └── specification/       composable search criteria (JPA Specifications)
+├── entity/                  JPA entities: Candidate, CandidateStatusChange
+├── model/                   status workflow, skill-match mode, value objects
+├── dto/request, dto/response   API request/response records with validation rules
+├── mapper/                  entity ↔ DTO mapping, search-request translation
+├── exception/               error codes, typed exceptions, the global exception handler
+├── filter/                  servlet filters: request id, access log, security headers, size limit, API key
+├── config/                  Spring configuration and typed properties
+├── validation/              custom validation constraint (country code)
+└── util/                    input normalization, request context
 src/main/resources/db/migration   Flyway schema (V1)
 src/main/resources/db/seed        dev-only sample data
 scripts/                          1M-row data generator and EXPLAIN script behind the numbers in DESIGN.md
